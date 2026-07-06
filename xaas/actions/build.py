@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-import itertools
 import logging
 import os
 import shlex
 import subprocess
 from dataclasses import dataclass
 from dataclasses import field
-from functools import reduce
-from typing import Generator
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry, DockerLayerPrepared, DerivedDockerImageDescriptor
-from xaas.config import CPUArchitecture
+from xaas.config import BuildResult, TargetTriple, ArgumentsVariableEntry, DerivedDockerImageDescriptor
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
 from xaas.config import RunConfig
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
+
+from xaas.util import ir_container_utils
 
 
 @dataclass
@@ -78,28 +76,6 @@ class BuildGenerator(Action):
 
         return True
 
-    @staticmethod
-    def _all_feature_permutations(config: PartialRunConfig) -> Generator[tuple[dict[FeatureType, bool], dict[str, str]], None, None]:
-        permutations_boolean = [
-            [tuple([feature, False]), tuple([feature, True])] for feature in config.features_boolean.keys()
-        ]
-
-        permutations_select = [
-            [ tuple([k, v]) for v in values ] for k, values in config.features_select.items()
-        ]
-
-        for states_boolean in itertools.product(*permutations_boolean):
-            for states_select in itertools.product(*permutations_select):
-                yield dict(states_boolean), dict(states_select)
-
-    @staticmethod
-    def generate_name(effective_cpu_architecture: CPUArchitecture, states_boolean: dict[FeatureType, bool], states_select: dict[str, str]) -> str:
-        return "_".join([
-            effective_cpu_architecture.value,
-            *[x.value for x, state in states_boolean.items() if state],
-            *[f"{k}-{v}" for k, v in states_select.items()]
-        ])
-
     def _build_cmake(self, run_config: Config) -> bool:
         containers = []
 
@@ -111,21 +87,15 @@ class BuildGenerator(Action):
             effective_run_config = run_config.for_target(effective_cpu_architecture)
             effective_base_builder_image, effective_base_runtime_image = effective_run_config.effective_docker_images()
 
-            for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
-                build_dir = self.generate_name(effective_cpu_architecture, states_boolean, states_select)
+            for states_boolean, states_select in ir_container_utils.get_all_feature_permutations(effective_run_config):
+                build_dir = ir_container_utils.get_name_suffix_for_configuration(effective_cpu_architecture, states_boolean, states_select)
 
-                arguments = reduce(BuildSystemArguments.merge, [
-                    # universal build arguments
-                    effective_run_config.build_args,
+                arguments = ir_container_utils.get_effective_build_system_arguments(effective_run_config, states_boolean, states_select)
 
-                    # include build arguments for the current feature selection
-                    *[ effective_run_config.features_boolean[feat].args_for_state(state) for feat, state in states_boolean.items() ],
-                    *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
-                ])
-
-                prepared_dependencies = [ d.prepare(effective_cpu_architecture, states_boolean, states_select) for d in arguments.dependencies ]
-
-                builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
+                builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(
+                    effective_base_builder_image,
+                    effective_base_runtime_image,
+                    ir_container_utils.get_prepared_dependencies(effective_cpu_architecture, states_boolean, states_select, arguments))
 
                 # TODO: jrabil: podman supports running containers with bind mounts from other images, so if we ever add support for podman that could make builds SIGNIFICANTLY faster
                 prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner)

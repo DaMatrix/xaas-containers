@@ -1,12 +1,11 @@
 import logging
-from functools import reduce
 
-from xaas.config import BuildSystemArguments, DerivedDockerImageDescriptor
+from xaas.config import DerivedDockerImageDescriptor
 from xaas.actions.action import Action
-from xaas.actions.build import BuildGenerator
 from xaas.actions.build import Config as BuildConfig
 from xaas.config import DeployConfig
 from xaas.docker import DockerBuildFeatures
+from xaas.util import ir_container_utils
 from xaas.util.dockerfile import DockerfileBuilder, DockerfileStage, CopyStep, RunStep
 
 
@@ -19,7 +18,7 @@ class Deployment(Action):
         self.parallel_workers = parallel_workers
 
     def execute(self, config: DeployConfig) -> bool:
-        name = BuildGenerator.generate_name(config.cpu_architecture, config.features_boolean, config.features_select)
+        name = ir_container_utils.get_name_suffix_for_configuration(config.cpu_architecture, config.features_boolean, config.features_select)
 
         docker_builder = self.docker_runner.try_get_buildkit_builder() or self.docker_runner
 
@@ -47,19 +46,14 @@ class Deployment(Action):
         states_boolean = deploy_config.features_boolean
         states_select = deploy_config.features_select
 
-        arguments = reduce(BuildSystemArguments.merge, [
-            # universal build arguments
-            effective_run_config.build_args,
-
-            # include build arguments for the current feature selection
-            *[ effective_run_config.features_boolean[feat].args_for_state(state) for feat, state in states_boolean.items() ],
-            *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
-        ])
+        arguments = ir_container_utils.get_effective_build_system_arguments(effective_run_config, states_boolean, states_select)
 
         # figure out which layers we need to include in the builder and runtime images
-        prepared_dependencies = [ d.prepare(effective_cpu_architecture, states_boolean, states_select) for d in arguments.dependencies ]
-
-        builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
+        builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(
+            effective_base_builder_image,
+            effective_base_runtime_image,
+            ir_container_utils.get_prepared_dependencies(effective_cpu_architecture, states_boolean, states_select, arguments),
+        )
 
         # generate a dockerfile for deploying the final image
         dockerfile_builder = DockerfileBuilder()
