@@ -89,10 +89,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
     eatmydata apt-get update && eatmydata apt-get install -y \
         libomp-19-dev
 
+# Install bear for automake-based builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install --yes --no-install-recommends \
+        bear
 
 #
 # Finish up by copying the compiled LLVM tools into the final image
 #
+
+COPY --link tools/noop-compiler-redirect/ /tools/noop-compiler-redirect/
 
 COPY --link --from=builder-debian13-llvm19_features-analyzer /tools /tools
 COPY --link --from=builder-debian13-llvm19_openmp-finder /tools /tools

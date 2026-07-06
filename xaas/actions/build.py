@@ -9,7 +9,7 @@ from dataclasses import field
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, ArgumentsVariableEntry, DerivedDockerImageDescriptor
+from xaas.config import BuildResult, TargetTriple, ArgumentsVariableEntry, DerivedDockerImageDescriptor, CPUArchitecture, BuildSystemArguments
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
 from xaas.config import RunConfig
@@ -52,13 +52,7 @@ class BuildGenerator(Action):
                 # we need to use older CUDA - not necessary so far
                 raise NotImplementedError("We need to use older CUDA for this project")
 
-        status: bool
-        if run_config.build_system == BuildSystem.CMAKE:
-            status = self._build_cmake(config_obj)
-        else:
-            raise NotImplementedError(
-                f"[{self.name}] Unsupported build system: {run_config.build_system}"
-            )
+        status: bool = self._build_generic(config_obj, run_config.build_system)
 
         config_path = os.path.join(run_config.working_directory, "buildgen.yml")
         config_obj.save(config_path)
@@ -76,7 +70,7 @@ class BuildGenerator(Action):
 
         return True
 
-    def _build_cmake(self, run_config: Config) -> bool:
+    def _build_generic(self, run_config: Config, build_system: BuildSystem) -> bool:
         containers = []
 
         # FIXME: test it for multiple combinations
@@ -100,49 +94,36 @@ class BuildGenerator(Action):
                 # TODO: jrabil: podman supports running containers with bind mounts from other images, so if we ever add support for podman that could make builds SIGNIFICANTLY faster
                 prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner)
 
+                host_source_dir = run_config.source_directory
+
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
 
-                # environment variables from the build arguments should be defined when running CMake
+                container_source_dir = "/source"
+                container_build_dir = "/build"
+
+                # environment variables from the build arguments should be defined when running the build generator
                 # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
-                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(prepared_builder_image))
+                configure_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(prepared_builder_image))
 
                 target_triple = TargetTriple.from_cpu_architecture(effective_cpu_architecture)
-
-                toolchain_file_name = "toolchain.cmake"
-                toolchain_lines = [
-                    "set(CMAKE_C_COMPILER clang)",
-                    "set(CMAKE_CXX_COMPILER clang++)",
-                    f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
-                    f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
-                ]
-                with open(os.path.join(new_dir, toolchain_file_name), "w") as toolchain_output:
-                    toolchain_output.write('\n'.join(toolchain_lines))
 
                 logging.info(
                     f"Executing build in {new_dir}, image {prepared_builder_image}, combination: {states_boolean | states_select}"
                 )
 
-                cmake_command: list[str] = [
-                    "cmake",
-                    f"-DCMAKE_TOOLCHAIN_FILE=/build/{toolchain_file_name}",
-                    "-DCMAKE_BUILD_TYPE=Release",
-                    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-
-                    # properties from the build arguments should be defined as CMake variables
-                    *ArgumentsVariableEntry.reduce_to_cmake_args(arguments.property),
-
-                    # additional CMake arguments
-                    *arguments.arguments,
-
-                    "-S",
-                    "/source",
-                    "-B",
-                    "/build",
-                ]
+                configure_command: list[str]
+                if build_system == BuildSystem.CMAKE:
+                    configure_command = self._build_command_cmake(
+                        arguments, target_triple,
+                        host_source_dir, new_dir,
+                        container_source_dir, container_build_dir,
+                    )
+                else:
+                    raise NotImplementedError(f"[{self.name}] Unsupported build system: {build_system}")
 
                 configure_commands: list[list[str]] = [
-                    cmake_command,
+                    configure_command,
                     *run_config.additional_steps,
                 ]
 
@@ -152,10 +133,10 @@ class BuildGenerator(Action):
                 volumes = []
                 volumes.append(
                     VolumeMount(
-                        source=os.path.realpath(run_config.source_directory), target="/source"
+                        source=os.path.realpath(host_source_dir), target=container_source_dir
                     )
                 )
-                volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
+                volumes.append(VolumeMount(source=os.path.realpath(new_dir), target=container_build_dir))
 
                 res = BuildResult(
                     directory=new_dir,
@@ -173,10 +154,10 @@ class BuildGenerator(Action):
                         self.docker_runner.run(
                             image=prepared_builder_image,
                             command=[ "bash", "-c", configure_cmd ],
-                            environment=cmake_environment,
+                            environment=configure_environment,
                             mounts=volumes,
                             remove=False,
-                            working_dir="/build",
+                            working_dir=container_build_dir,
                         ),
                         res,
                     )
@@ -199,3 +180,38 @@ class BuildGenerator(Action):
             raise RuntimeError("Build failed")
 
         return True
+
+    def _build_command_cmake(
+            self,
+            arguments: BuildSystemArguments,
+            target_triple: TargetTriple,
+            host_source_dir: str, host_build_dir: str,
+            container_source_dir: str, container_build_dir: str,
+    ) -> list[str]:
+        toolchain_file_name = "toolchain.cmake"
+        toolchain_lines = [
+            "set(CMAKE_C_COMPILER clang)",
+            "set(CMAKE_CXX_COMPILER clang++)",
+            f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
+            f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
+        ]
+        with open(os.path.join(host_build_dir, toolchain_file_name), "w") as toolchain_output:
+            toolchain_output.write('\n'.join(toolchain_lines))
+
+        return [
+            "cmake",
+            f"-DCMAKE_TOOLCHAIN_FILE={container_build_dir}/{toolchain_file_name}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+
+            # properties from the build arguments should be defined as CMake variables
+            *ArgumentsVariableEntry.reduce_to_cmake_args(arguments.property),
+
+            # additional CMake arguments
+            *arguments.arguments,
+
+            "-S",
+            container_source_dir,
+            "-B",
+            container_build_dir,
+        ]
