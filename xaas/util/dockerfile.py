@@ -259,7 +259,7 @@ class DockerfileBuilder:
 
         if name is None:
             i = len(self.stages)
-            while f"stage_{i}" not in self.stages:
+            while f"stage_{i}" in self.stages:
                 i = i + 1
             name = f"stage_{i}"
 
