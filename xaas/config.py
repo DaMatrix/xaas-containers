@@ -502,8 +502,8 @@ class PartialRunConfig(BaseXaasConfigModel):
             features_select = union_distinct(a.features_select, b.features_select),
             build_args = BuildSystemArguments.merge(a.build_args, b.build_args),
 
-            builder_image = a.builder_image or b.builder_image,
-            runtime_image = a.runtime_image or b.runtime_image,
+            builder_image = b.builder_image or a.builder_image,
+            runtime_image = b.runtime_image or a.runtime_image,
         )
 
     def effective_docker_images(self) -> tuple[str, str]:
