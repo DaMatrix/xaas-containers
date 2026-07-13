@@ -130,7 +130,6 @@ class IRCompiler(Action):
         logging.info("[{self.name}] Generating LLVM IR")
 
         containers = {}
-        compile_dbs = {}
 
         ir_dir = os.path.realpath(os.path.join(config.build.working_directory, self.IR_PATH))
         os.makedirs(ir_dir, exist_ok=True)
@@ -167,16 +166,6 @@ class IRCompiler(Action):
                 tty=True,
                 working_dir="/build",
             )
-
-            project_file = os.path.join(build.directory, "compile_commands.json")
-            try:
-                with open(project_file) as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError) as e:
-                raise RuntimeError(f"Error reading {project_file}: {e}") from e
-
-            compile_dbs[build.directory] = {entry["output"]: entry for entry in data}
-
         total_tasks = 0
         for _, status in config.targets.items():
             total_tasks += 1
@@ -195,8 +184,8 @@ class IRCompiler(Action):
                         or os.path.basename(baseline_project) in self.build_projects
                     ):
                         logging.debug(f"[{self.name}] Build file {target} for {baseline_project}")
-                        cmake_cmd = compile_dbs[baseline_project][target]["command"]
-                        cmake_directory = compile_dbs[baseline_project][target]["directory"]
+                        cmake_cmd = status.projects[baseline_project].command.original_command
+                        cmake_directory = status.projects[baseline_project].command.build_dir
                         ir_path, is_new = self._find_id(
                             target,
                             status.projects[status.baseline_project],
@@ -246,8 +235,8 @@ class IRCompiler(Action):
                             futures.append(fut)
                             continue
 
-                        cmake_cmd = compile_dbs[project_name][target]["command"]
-                        cmake_directory = compile_dbs[project_name][target]["directory"]
+                        cmake_cmd = status.projects[project_name].command.original_command
+                        cmake_directory = status.projects[project_name].command.build_dir
 
                         futures.append(
                             executor.submit(

@@ -73,34 +73,32 @@ class DockerImageBuilder(Action):
     ) -> str:
         lines = ["#!/bin/bash", ""]
 
-        project_file = os.path.join(project_dir, "compile_commands.json")
-        try:
-            with open(project_file) as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            raise RuntimeError(f"Error reading {project_file}: {e}") from e
-
-        compile_dbs = {entry["output"]: entry for entry in data}
-
         for target, result in config.targets.items():
             if project_dir not in result.projects:
                 continue
 
-            ir_file = result.projects[project_dir].ir_file.file
-            cmake_directory = compile_dbs[target]["directory"]
-            source_file = compile_dbs[target]["file"]
-            output_file = compile_dbs[target]["output"]
+            file_status = result.projects[project_dir]
+            compile_command = file_status.command
 
-            if result.projects[project_dir].command.compiler_type == Compiler.NVCC:
+            ir_file = result.projects[project_dir].ir_file.file
+            cmake_directory = compile_command.build_dir
+            source_file = compile_command.source
+            output_file = compile_command.output_path
+
+            # TODO: jrabil: stop hardcoding /build and /source everywhere
+            output_file = os.path.relpath(os.path.join("/build", output_file), cmake_directory)
+
+            if compile_command.compiler_type == Compiler.NVCC:
                 ir_cmd = self._generate_nvcc(
                     cast(NVCCCompileCommand, result.projects[project_dir].command),
                     ir_file,
                     output_file,
                 )
             else:
-                cmake_cmd = compile_dbs[target]["command"]
+                cmake_cmd = compile_command.original_command
 
-                ir_cmd = cmake_cmd.replace(compile_dbs[target]["file"], ir_file)
+                assert source_file in cmake_cmd, f"'{source_file}' not found in command: '{cmake_cmd}'"
+                ir_cmd = cmake_cmd.replace(source_file, ir_file)
 
                 # TODO: is this general enough?
                 compiler = ir_cmd.split(" ")[0]

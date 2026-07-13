@@ -1,0 +1,4 @@
+#!/bin/bash
+set -eu
+
+PATH="$( realpath "$( dirname "$0" )/bin" ):$PATH" exec "$@"

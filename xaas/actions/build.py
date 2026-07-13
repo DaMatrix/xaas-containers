@@ -9,14 +9,14 @@ from dataclasses import field
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, ArgumentsVariableEntry, DerivedDockerImageDescriptor, CPUArchitecture, BuildSystemArguments
+from xaas.config import BuildResult, TargetTriple, ArgumentsVariableEntry, DerivedDockerImageDescriptor, CPUArchitecture, BuildSystemArguments, ArgumentsVariableEntryType, XaaSConfig
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
 from xaas.config import RunConfig
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
-from xaas.util import ir_container_utils
+from xaas.util import ir_container_utils, shell
 
 
 @dataclass
@@ -50,7 +50,9 @@ class BuildGenerator(Action):
             )
             if output.returncode == 0:
                 # we need to use older CUDA - not necessary so far
-                raise NotImplementedError("We need to use older CUDA for this project")
+                #raise NotImplementedError("We need to use older CUDA for this project")
+                # TODO: jrabil: this doesn't seem to be necessary?
+                pass
 
         status: bool = self._build_generic(config_obj, run_config.build_system)
 
@@ -64,7 +66,7 @@ class BuildGenerator(Action):
             print(f"[{self.name}] Source location does not exist: {run_config.source_directory}")
             return False
 
-        if run_config.build_system not in [BuildSystem.CMAKE]:
+        if run_config.build_system not in [BuildSystem.AUTOTOOLS, BuildSystem.CMAKE]:
             print(f"[{self.name}] Unsupported build system: {run_config.build_system}")
             return False
 
@@ -112,9 +114,15 @@ class BuildGenerator(Action):
                     f"Executing build in {new_dir}, image {prepared_builder_image}, combination: {states_boolean | states_select}"
                 )
 
-                configure_command: list[str]
-                if build_system == BuildSystem.CMAKE:
-                    configure_command = self._build_command_cmake(
+                configure_commands: shell.Command
+                if build_system == BuildSystem.AUTOTOOLS:
+                    configure_commands = self._build_command_autotools(
+                        arguments, target_triple,
+                        host_source_dir, new_dir,
+                        container_source_dir, container_build_dir,
+                    )
+                elif build_system == BuildSystem.CMAKE:
+                    configure_commands = self._build_command_cmake(
                         arguments, target_triple,
                         host_source_dir, new_dir,
                         container_source_dir, container_build_dir,
@@ -122,12 +130,12 @@ class BuildGenerator(Action):
                 else:
                     raise NotImplementedError(f"[{self.name}] Unsupported build system: {build_system}")
 
-                configure_commands: list[list[str]] = [
-                    configure_command,
-                    *run_config.additional_steps,
-                ]
+                configure_commands = shell.ListAnd([
+                    configure_commands,
+                    *[ shell.SimpleCommand(step) for step in run_config.additional_steps ],
+                ])
 
-                configure_cmd: str = " && ".join([ shlex.join(command) for command in configure_commands ])
+                configure_cmd: str = configure_commands.to_shell(False)
                 logging.info(f"[{self.name}] Running: {configure_cmd}")
 
                 volumes = []
@@ -181,13 +189,93 @@ class BuildGenerator(Action):
 
         return True
 
+    def _build_command_autotools(
+            self,
+            arguments: BuildSystemArguments,
+            target_triple: TargetTriple,
+            host_source_dir: str, host_build_dir: str,
+            container_source_dir: str, container_build_dir: str,
+    ) -> shell.Command:
+        # extend the build system arguments to override the compiler binaries and compilation flags for the target
+        modified_arguments = BuildSystemArguments.merge(
+            BuildSystemArguments(property={
+                "CC": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "clang"),
+                "CXX": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "clang++"),
+                "F77": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "flang"),
+
+                "CFLAGS": ArgumentsVariableEntry(ArgumentsVariableEntryType.APPEND, f"--target={target_triple.value}", separator=" "),
+                "CXXFLAGS": ArgumentsVariableEntry(ArgumentsVariableEntryType.APPEND, f"--target={target_triple.value}", separator=" "),
+                "FFLAGS": ArgumentsVariableEntry(ArgumentsVariableEntryType.APPEND, f"--target={target_triple.value}", separator=" "),
+            }),
+            arguments)
+
+        return shell.ListAnd([
+            shell.SimpleCommand([
+                os.path.join(container_source_dir, "configure"),
+                f"--srcdir={container_source_dir}",
+
+                # properties from the build arguments should be defined as ./configure variables
+                *[f"{name}={value}" for name, value in ArgumentsVariableEntry.reduce_to_dict(modified_arguments.property, None).items()],
+
+                # additional ./configure arguments
+                *modified_arguments.arguments,
+            ]),
+            shell.Pipeline([
+                shell.SimpleCommand([
+                    # f"PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH",
+                    XaaSConfig().tool_locations.noop_compiler_redirect_wrapper_executable,
+                    "make",
+                    f"-j{os.process_cpu_count()}",
+                    "-w",
+                ], assignments={
+                    "PATH": shell.Concat([
+                        shell.Literal(f"{XaaSConfig().tool_locations.noop_compiler_redirect_dir}:"),
+                        shell.Parameter("PATH"),
+                    ]),
+                }),
+                shell.SimpleCommand([
+                    XaaSConfig().tool_locations.compiledb_executable,
+                    # make the command be a single string instead of a list to match CMake behavior
+                    "--command-style",
+                ]),
+            ]),
+            shell.SimpleCommand([
+                "make",
+                "clean",
+            ]),
+        ])
+
+        # return [
+        #     [
+        #         os.path.join(container_source_dir, "configure"),
+        #         f"--srcdir={container_source_dir}",
+        #
+        #         # properties from the build arguments should be defined as ./configure variables
+        #         *[ f"{name}={value}" for name, value in ArgumentsVariableEntry.reduce_to_dict(modified_arguments.property, None).items() ],
+        #
+        #         # additional CMake arguments
+        #         *arguments.arguments,
+        #     ],
+        #     [
+        #         #f"PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH",
+        #         XaaSConfig().tool_locations.noop_compiler_redirect_wrapper_executable,
+        #         "make",
+        #         f"-j{os.process_cpu_count()}",
+        #         "-w",
+        #
+        #         "|",
+        #         XaaSConfig().tool_locations.compiledb_executable,
+        #     ],
+        #     [ "make", "clean" ],
+        # ]
+
     def _build_command_cmake(
             self,
             arguments: BuildSystemArguments,
             target_triple: TargetTriple,
             host_source_dir: str, host_build_dir: str,
             container_source_dir: str, container_build_dir: str,
-    ) -> list[str]:
+    ) -> shell.Command:
         toolchain_file_name = "toolchain.cmake"
         toolchain_lines = [
             "set(CMAKE_C_COMPILER clang)",
@@ -198,7 +286,7 @@ class BuildGenerator(Action):
         with open(os.path.join(host_build_dir, toolchain_file_name), "w") as toolchain_output:
             toolchain_output.write('\n'.join(toolchain_lines))
 
-        return [
+        return shell.SimpleCommand([
             "cmake",
             f"-DCMAKE_TOOLCHAIN_FILE={container_build_dir}/{toolchain_file_name}",
             "-DCMAKE_BUILD_TYPE=Release",
@@ -214,4 +302,4 @@ class BuildGenerator(Action):
             container_source_dir,
             "-B",
             container_build_dir,
-        ]
+        ])

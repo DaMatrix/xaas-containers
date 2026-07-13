@@ -164,13 +164,16 @@ class ArgumentsVariableEntry(BaseXaasConfigModel):
             raise RuntimeError(f"Unknown type: {self.type}")
 
     @staticmethod
-    def reduce_to_dict(entries: dict[str, ArgumentsVariableEntry], defaults: dict[str, str]) -> dict[str, str]:
+    def reduce_to_dict(entries: dict[str, ArgumentsVariableEntry], defaults: dict[str, str] | None) -> dict[str, str]:
         """
         Reduces a group of argument variables down to a single dict containing the effective key-value mappings.
 
         :param entries: the argument variable entries
         :param defaults: a dict containing the inherited initial variable values
         """
+
+        if not defaults:
+            return { name: entry.value for name, entry in entries.items() }
 
         result: dict[str, str] = {}
         for name, entry in entries.items():
@@ -334,6 +337,12 @@ class DockerLayers(BaseXaasConfigModel):
 
 
 class XaaSConfig:
+    @dataclass
+    class ToolLocations(BaseXaasConfigModel):
+        compiledb_executable: str
+        noop_compiler_redirect_dir: str
+        noop_compiler_redirect_wrapper_executable: str
+
     _instance: XaaSConfig | None = None
 
     DEFAULT_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "system.yaml")
@@ -358,6 +367,7 @@ class XaaSConfig:
         self.default_runtime_image: str
         self.parallelism_level: int
         self.layers: DockerLayers
+        self.tool_locations: XaaSConfig.ToolLocations
 
     def initialize(self, config_path: str) -> None:
         if self._initialized:
@@ -373,6 +383,7 @@ class XaaSConfig:
         self.parallelism_level = config_data["parallelism_level"]
         self.default_builder_image = _variable_expand(config_data["default_builder_image"], self.config_vars)
         self.default_runtime_image = _variable_expand(config_data["default_runtime_image"], self.config_vars)
+        self.tool_locations = XaaSConfig.ToolLocations.from_dict(config_data["tool_locations"])
 
         match config_data["ir_type"]:
             case IRType.LLVM_IR.value:

@@ -41,11 +41,20 @@ class CompileCommand(BaseXaasConfigModel):
     class Config(BaseXaasConfigModel.Config):
         discriminator = Discriminator(field="compiler_type", include_subtypes=True)
 
+    # TODO: jrabil: if we end up keeping this field, it should probably be made into a list[str].
+    original_command: str
+    """The original build command, as specified by the project build system (in ``compile_commands.json`` or similar)."""
     source: str
+    """The absolute container path to the source file."""
+    output_path: str
+    """The output object file path, relative to the PROJECT build directory (normally ``/build``).
+    Note that this is NOT relative to the build command's working directory as specified by the ``build_dir`` field!"""
     build_dir: str
+    """The absolute container path to the directory where the build command will be launched."""
     compiler: str
     compiler_type: Compiler
     target_triple: TargetTriple | None = None
+
     flags: set = field(default_factory=set)
     includes: set = field(default_factory=set)
     optimizations: set = field(default_factory=set)
@@ -188,20 +197,19 @@ class BuildAnalyzer(Action):
         except (json.JSONDecodeError, FileNotFoundError) as e:
             raise RuntimeError(f"Error reading {project_file}: {e}") from e
 
-        files = {entry["output"]: entry for entry in data}
-
         project_result = ProjectResult()
 
-        for target, specification in files.items():
+        for entry in data:
             cmd = self._parse_command(
-                specification["command"],
-                specification["file"],
-                specification["output"],
-                specification["directory"],
+                entry["command"],
+                entry["file"],
+                # this field may be absent
+                entry.get("output"),
+                entry["directory"],
             )
-            assert cmd
+            assert cmd and cmd.output_path, entry
 
-            project_result.files[target] = cmd
+            project_result.files[cmd.output_path] = cmd
 
         return project_result
 
@@ -334,16 +342,29 @@ class BuildAnalyzer(Action):
 
     @staticmethod
     def _parse_command(
-        command: str, source: str, target: str, build_dir: str
-    ) -> CompileCommand | None:
+        command: str, source: str, target: str | None, build_dir: str
+    ) -> CompileCommand:
         elems = command.split()
         if not elems:
-            return None
+            raise RuntimeError("Empty command string!")
+
+        # strip unwanted command-line flags from the command
+        elems = BuildAnalyzer._strip_depfile_flags(elems)
+        command = " ".join(elems)
+
+        output_path: str | None = None
+
+        if target is not None:
+            # If target is already an absolute path, this will do nothing
+            # TODO: jrabil: stop hardcoding /build and /source everywhere
+            output_path = os.path.join("/build", target)
+        # Make sure we don't accidentally use this later :)
+        del target
 
         if os.path.basename(elems[0]) in ["clang++", "clang", "cc", "c++"]:
-            result = ClangCompileCommand(source, build_dir, elems[0])
+            result = ClangCompileCommand(command, source, "", build_dir, elems[0])
         elif os.path.basename(elems[0]) == "nvcc":
-            result = NVCCCompileCommand(source, build_dir, elems[0])
+            result = NVCCCompileCommand(command, source, "", build_dir, elems[0])
         elif os.path.basename(elems[0]) == "icpx":
             # compiler_type = Compiler.ICPX
             raise NotImplementedError()
@@ -380,10 +401,23 @@ class BuildAnalyzer(Action):
             # Handle optimization flags
             elif elem.startswith("-O"):
                 result.optimizations.add(elem)
-            # Skip output file
+            # Handle output file
             elif elem == "-o":
+                if output_path is None:
+                    # TODO: jrabil: ideally we don't want to prefix it with build_dir, only the difference between build_dir and the root build directory
+                    output_path = os.path.join(build_dir, elems[i + 1])
                 i += 2
                 continue
+            # Skip preprocessor depfile flags
+            elif elem.startswith("-M"):
+                if elem in ["-MF", "-MT", "-MQ"]:
+                    i += 2
+                    continue
+                elif elem in ["-M", "-MM", "-MG", "-MP", "-MD", "-MMD"]:
+                    i += 1
+                    continue
+                else:
+                    handled = False
             # We catch everything like `-m<...>`
             # this might also catch some other Clang options
             elif re.match(r"-m(?:tune=|arch=|)(\w+)", elem):
@@ -415,10 +449,18 @@ class BuildAnalyzer(Action):
             # Other arguments
             # catch some outliers
             # ignore source and target files
-            if not handled and elem not in ["-c", source, target]:
+            if not handled and elem not in ["-c", source]:
                 result.others.add(elem)
 
             i += 1
+
+        if not output_path:
+            raise RuntimeError(f"Unable to determine output file path for '{command}'")
+
+        assert os.path.isabs(output_path), output_path
+        assert output_path.startswith("/build"), output_path
+        result.output_path = os.path.relpath(output_path, "/build")
+
         return result
 
     @staticmethod
@@ -434,6 +476,7 @@ class BuildAnalyzer(Action):
             Some options like gencode are quoted.
             We need to strip quotes to handle them correctly.
         """
+        # TODO: jrabil: if we use shlex.split() above, then this is unnecessary
         elem = elem.strip('"').strip("'").rstrip("'").rstrip('"')
 
         """
@@ -543,3 +586,39 @@ class BuildAnalyzer(Action):
                 result.gencode_ptx.add(version)
             else:
                 raise RuntimeError(f"Unknown code target format: {target}")
+
+    # see https://gcc.gnu.org/onlinedocs/gcc/Preprocessor-Options.html#index-M
+    _DEPFILE_FLAGS_WITH_ARG: set[str] = {
+        "-MF",
+        "-MT",
+        "-MQ",
+    }
+    _DEPFILE_FLAGS_WITHOUT_ARG: set[str] = {
+        "-M", "--dependencies",
+        "-MM", "--user-dependencies",
+        "-MG", "--print-missing-file-dependencies",
+        "-Mno-modules",
+        "-MP",
+        "-MD", "--write-dependencies",
+        "-MMD", "--write-user-dependencies",
+    }
+
+    @staticmethod
+    def _strip_depfile_flags(original_command: list[str]) -> list[str]:
+        # skip compiler name
+        result = [original_command[0]]
+        i = 1
+        while i < len(original_command):
+            elem = original_command[i]
+
+            if elem in BuildAnalyzer._DEPFILE_FLAGS_WITH_ARG:
+                i += 2
+                continue
+            elif elem in BuildAnalyzer._DEPFILE_FLAGS_WITHOUT_ARG:
+                i += 1
+                continue
+            else:
+                result.append(elem)
+                i += 1
+
+        return result

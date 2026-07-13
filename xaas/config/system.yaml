@@ -8,5 +8,10 @@ config_vars:
 default_builder_image: "${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-builder-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION}"
 default_runtime_image: "${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-runner-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION}"
 
+tool_locations:
+  compiledb_executable: "/tools/compiledb"
+  noop_compiler_redirect_dir: "/tools/noop-compiler-redirect/bin"
+  noop_compiler_redirect_wrapper_executable: "/tools/noop-compiler-redirect/wrapper"
+
 ir_type: "llvm-ir"
 parallelism_level: 4

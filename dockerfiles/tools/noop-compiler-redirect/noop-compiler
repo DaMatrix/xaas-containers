@@ -1,0 +1,56 @@
+#!/bin/bash
+set -eu
+
+# save original command line for later
+cli_name="$0"
+cli_args=("$@")
+
+# variables which may be set
+output_path=""
+depfile_path=""
+
+# digest the command line arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--output)
+      # save output path
+      output_path="$2"
+      shift 2
+      ;;
+    --output=*)
+      # save output path
+      output_path="${1#--output=}"
+      shift 1
+      ;;
+    -MF)
+      # save depfile output path
+      depfile_path="$2"
+      shift 2
+      ;;
+
+    # special flags which have an extra trailing argument
+    -I|-iquote|-isystem|-idirafter|--include-directory-after|--include-directory)
+      shift 2
+      ;;
+
+    *)
+      shift
+      ;;
+  esac
+done
+
+# validate state
+if [ -z "$output_path" ]; then
+  echo "couldn't determine compiler output path!"$'\n\t'"${cli_name} ${cli_args[@]}" >&2
+  exit 1
+fi
+
+# create phony output files
+# (put them in a list so we can pass them all to 'touch' at once for better performance)
+output_files_to_touch=("$output_path")
+
+if [ ! -z "$depfile_path" ]; then
+  output_files_to_touch+=("$depfile_path")
+fi
+
+exec touch "${output_files_to_touch[@]}"

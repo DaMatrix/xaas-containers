@@ -15,6 +15,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
         libclang-19-dev \
         libzstd-dev
 
+FROM builder-debian13-llvm19_tools AS builder-debian13-llvm19_compiledb
+RUN mkdir /tools \
+    && curl -L https://github.com/fcying/compiledb-go/releases/download/v1.6.1/compiledb-linux-amd64.txz | tar xJ -C /tools
+
 FROM builder-debian13-llvm19_tools AS builder-debian13-llvm19_features-analyzer
 RUN --mount=type=bind,rw,source=tools/llvm-features/,target=/tmp/llvm-features \
     cd /tmp/llvm-features \
@@ -100,5 +104,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
 
 COPY --link tools/noop-compiler-redirect/ /tools/noop-compiler-redirect/
 
+COPY --link --from=builder-debian13-llvm19_compiledb /tools /tools
 COPY --link --from=builder-debian13-llvm19_features-analyzer /tools /tools
 COPY --link --from=builder-debian13-llvm19_openmp-finder /tools /tools

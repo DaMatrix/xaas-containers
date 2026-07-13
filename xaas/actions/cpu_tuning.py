@@ -143,7 +143,6 @@ class CPUTuning(Action):
                     baseline_flags,
                     target,
                     cmd,
-                    containers[status.baseline_project].working_dir,
                 )
 
                 ## FIXME: handle groups of the same hash
@@ -190,7 +189,6 @@ class CPUTuning(Action):
                             new_flags,
                             target,
                             divergent_cmd,
-                            containers[project_name].working_dir,
                         )
                         project_status.cpu_tuning = new_flags
                         simplify_baseline = True
@@ -237,7 +235,6 @@ class CPUTuning(Action):
         flags: set[str],
         target: str,
         command: CompileCommand,
-        working_dir: str,
     ) -> CPUTuningFeatures:
         for k, v in config.build.target_flags:
             if k == flags:
@@ -256,12 +253,14 @@ class CPUTuning(Action):
         preprocess_cmd.extend(flags)
 
         ir_file = str(Path(target).with_suffix(".ll"))
+        # TODO: jrabil: stop hardcoding /build and /source everywhere
+        ir_file = os.path.join("/build", ir_file)
 
         preprocess_cmd.extend(["-S", "-emit-llvm", "-o", ir_file])
 
         cmd = ["/bin/bash", "-c", " ".join(preprocess_cmd)]
 
-        code, output = self.docker_runner.exec_run(container, cmd, working_dir)
+        code, output = self.docker_runner.exec_run(container, cmd, command.build_dir)
 
         if code != 0:
             raise RuntimeError(f"Error preprocessing {target}: {output}")
@@ -278,7 +277,7 @@ class CPUTuning(Action):
             "/dev/null",
         ]
         cmd = ["/bin/bash", "-c", " ".join(get_features_cmd)]
-        code, output = self.docker_runner.exec_run(container, cmd, working_dir)
+        code, output = self.docker_runner.exec_run(container, cmd, command.build_dir)
 
         if code != 0:
             raise RuntimeError(f"Error extracting features! {target}: {output}")
