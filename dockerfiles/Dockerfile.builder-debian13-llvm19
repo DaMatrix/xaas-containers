@@ -28,7 +28,7 @@ RUN --mount=type=bind,rw,source=tools/llvm-features/,target=/tmp/llvm-features \
     && mv libReplaceTargetFeatures.so /tools/llvm-features
 
 FROM builder-debian13-llvm19_tools AS builder-debian13-llvm19_openmp-finder
-RUN --mount=type=bind,rw,source=tools/,target=/tmp/openmp-finder \
+RUN --mount=type=bind,rw,source=tools/openmp-finder/,target=/tmp/openmp-finder \
     cd /tmp/openmp-finder \
     && cmake -DCMAKE_BUILD_TYPE=Release . \
     && make \
