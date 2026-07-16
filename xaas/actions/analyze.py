@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shlex
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -42,8 +43,9 @@ class CompileCommand(BaseXaasConfigModel):
         discriminator = Discriminator(field="compiler_type", include_subtypes=True)
 
     # TODO: jrabil: if we end up keeping this field, it should probably be made into a list[str].
-    original_command: str
-    """The original build command, as specified by the project build system (in ``compile_commands.json`` or similar)."""
+    original_args: str
+    """The original build command arguments, as specified by the project build system (in ``compile_commands.json`` or similar).
+    May be split using ``shlex.split()``"""
     source: str
     """The absolute container path to the source file."""
     output_path: str
@@ -61,6 +63,15 @@ class CompileCommand(BaseXaasConfigModel):
     cpu_tuning: set = field(default_factory=set)
     definitions: set = field(default_factory=set)
     others: set = field(default_factory=set)
+
+    def cmdline_compiler(self) -> list[str]:
+        if self.target_triple is None:
+            return [self.compiler]
+        else:
+            return [self.compiler, f"--target={self.target_triple.value}"]
+
+    def cmdline_original(self) -> list[str]:
+        return self.cmdline_compiler() + shlex.split(self.original_args)
 
 
 @dataclass
@@ -342,15 +353,15 @@ class BuildAnalyzer(Action):
 
     @staticmethod
     def _parse_command(
-        command: str, source: str, target: str | None, build_dir: str
+        command: str | list[str], source: str, target: str | None, build_dir: str
     ) -> CompileCommand:
-        elems = command.split()
+        elems: list[str] = command if isinstance(command, list) else shlex.split(command)
         if not elems:
             raise RuntimeError("Empty command string!")
 
         # strip unwanted command-line flags from the command
         elems = BuildAnalyzer._strip_depfile_flags(elems)
-        command = " ".join(elems)
+        original_command = shlex.join(elems[1:])
 
         output_path: str | None = None
 
@@ -362,9 +373,13 @@ class BuildAnalyzer(Action):
         del target
 
         if os.path.basename(elems[0]) in ["clang++", "clang", "cc", "c++"]:
-            result = ClangCompileCommand(command, source, "", build_dir, elems[0])
+            result = ClangCompileCommand(
+                source=source, output_path="", build_dir=build_dir,
+                compiler=elems[0], original_args=shlex.join(elems[1:]))
         elif os.path.basename(elems[0]) == "nvcc":
-            result = NVCCCompileCommand(command, source, "", build_dir, elems[0])
+            result = NVCCCompileCommand(
+                source=source, output_path="", build_dir=build_dir,
+                compiler=elems[0], original_args=shlex.join(elems[1:]))
         elif os.path.basename(elems[0]) == "icpx":
             # compiler_type = Compiler.ICPX
             raise NotImplementedError()
@@ -404,7 +419,6 @@ class BuildAnalyzer(Action):
             # Handle output file
             elif elem == "-o":
                 if output_path is None:
-                    # TODO: jrabil: ideally we don't want to prefix it with build_dir, only the difference between build_dir and the root build directory
                     output_path = os.path.join(build_dir, elems[i + 1])
                 i += 2
                 continue
@@ -471,13 +485,6 @@ class BuildAnalyzer(Action):
         Handle NVCC specific options like --options-file, ccbin, --generate-code, and -x cu.
         """
         elem = options[pos]
-
-        """
-            Some options like gencode are quoted.
-            We need to strip quotes to handle them correctly.
-        """
-        # TODO: jrabil: if we use shlex.split() above, then this is unnecessary
-        elem = elem.strip('"').strip("'").rstrip("'").rstrip('"')
 
         """
             Cmake will generate response files for includes, libraries, and objects.

@@ -3,6 +3,7 @@ import logging
 import os
 import json
 import re
+import shlex
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -174,7 +175,7 @@ class IRCompiler(Action):
         futures = []
         results = []
 
-        with tqdm.tqdm(total=total_tasks) as pbar:  # noqa: SIM117
+        with tqdm.tqdm(total=total_tasks, disable=True) as pbar:  # noqa: SIM117
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
                 for target, status in config.targets.items():
                     baseline_project = status.baseline_project
@@ -184,8 +185,7 @@ class IRCompiler(Action):
                         or os.path.basename(baseline_project) in self.build_projects
                     ):
                         logging.debug(f"[{self.name}] Build file {target} for {baseline_project}")
-                        cmake_cmd = status.projects[baseline_project].command.original_command
-                        cmake_directory = status.projects[baseline_project].command.build_dir
+                        project_status = status.projects[baseline_project]
                         ir_path, is_new = self._find_id(
                             target,
                             status.projects[status.baseline_project],
@@ -201,12 +201,11 @@ class IRCompiler(Action):
                                 containers[baseline_project],
                                 target,
                                 status.baseline_command,
-                                cmake_cmd,
-                                cmake_directory,
+                                project_status.command,
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
-                                status.projects[baseline_project].cpu_tuning,
+                                project_status.cpu_tuning,
                             )
                         )
 
@@ -235,17 +234,13 @@ class IRCompiler(Action):
                             futures.append(fut)
                             continue
 
-                        cmake_cmd = status.projects[project_name].command.original_command
-                        cmake_directory = status.projects[project_name].command.build_dir
-
                         futures.append(
                             executor.submit(
                                 self._compile_ir,
                                 containers[project_name],
                                 target,
                                 project_status.command,
-                                cmake_cmd,
-                                cmake_directory,
+                                project_status.command,
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
@@ -396,8 +391,7 @@ class IRCompiler(Action):
         container: Container,
         target: str,
         baseline_command: CompileCommand,
-        cmake_cmd: str,
-        cmake_directory: str,
+        compile_command: CompileCommand,
         ir_path: str,
         ir_target: str,
         working_directory: str,
@@ -406,13 +400,18 @@ class IRCompiler(Action):
         local_ir_target = os.path.join(working_directory, self.IR_PATH, target, ir_path)
         os.makedirs(os.path.dirname(local_ir_target), exist_ok=True)
 
+        container_command_working_directory = compile_command.build_dir
+
+        ir_cmd = shlex.join(compile_command.cmdline_original())
+
         # The paths can be relative:
         # directory: /build/a/b
         # target: a/b/x/c.cpp
         # actual file in the command
-        actual_target = os.path.relpath(os.path.join("/build", target), cmake_directory)
+        actual_target = os.path.relpath(os.path.join("/build", target), container_command_working_directory)
 
-        ir_cmd = cmake_cmd.replace(actual_target, ir_target)
+        assert actual_target in ir_cmd, f"'{actual_target}' not found in '{ir_cmd}'"
+        ir_cmd = ir_cmd.replace(actual_target, ir_target)
 
         if baseline_command.compiler_type == Compiler.NVCC:
             ir_cmd = CUDA.compile_nvcc(ir_cmd, cast(NVCCCompileCommand, baseline_command))
@@ -431,7 +430,7 @@ class IRCompiler(Action):
                 ir_cmd = ir_cmd.replace(flag, "")
 
         logging.info(f"IR Compilation of {baseline_command.source}, {target} -> {ir_target}")
-        code, output = self.docker_runner.exec_run(container, ["/bin/bash", "-c", ir_cmd], "/build")
+        code, output = self.docker_runner.exec_run(container, ["/bin/bash", "-c", ir_cmd], compile_command.build_dir)
 
         if code != 0:
             logging.error(f"Error generating IR for {baseline_command.source}: {output.decode("utf-8")}")

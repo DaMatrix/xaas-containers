@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import tempfile
 from typing import cast
 from pathlib import Path
@@ -95,14 +96,13 @@ class DockerImageBuilder(Action):
                     output_file,
                 )
             else:
-                cmake_cmd = compile_command.original_command
+                command_args = compile_command.original_args
 
-                assert source_file in cmake_cmd, f"'{source_file}' not found in command: '{cmake_cmd}'"
-                ir_cmd = cmake_cmd.replace(source_file, ir_file)
+                assert source_file in command_args, f"'{source_file}' not found in command: '{command_args}'"
+                command_args = command_args.replace(source_file, ir_file)
 
                 # TODO: is this general enough?
-                compiler = ir_cmd.split(" ")[0]
-                ir_cmd = ir_cmd.replace(compiler, f"{compiler} -xir")
+                ir_cmd = f"{shlex.join(compile_command.cmdline_compiler())} -xir {command_args}"
 
             # Locate the output file of compilation
             # The paths can be relative:
@@ -117,6 +117,9 @@ class DockerImageBuilder(Action):
             # we can't do whole word boundary with \b because we have slashes, which
             # are trated as not words
             ir_cmd = re.sub(rf"-o\s+\b{actual_target}\b", f"-o {output_file}", ir_cmd)
+
+            if compile_command.build_dir != "/build":
+                ir_cmd = f"cd {shlex.quote(compile_command.build_dir)} && {ir_cmd}"
 
             if len(result.projects[project_dir].cpu_tuning) > 0:
                 opt_cmd = self._cpu_tune(ir_file, result.projects[project_dir], config.build)

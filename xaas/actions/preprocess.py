@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from typing import cast
 from collections import defaultdict, namedtuple
 from itertools import islice
@@ -336,31 +337,12 @@ class ClangPreprocesser(Action):
         :return: a tuple (the preprocessed file path, bool flag which is True if the file uses OpenMP)
         """
 
-        compiler = None
-
-        if command.compiler_type == Compiler.CLANG:
-            # TODO: jrabil: why are we not using the actual clang binary from command.compiler here?
-            compiler = self.CLANG_PATH
-        elif command.compiler_type == Compiler.NVCC:
-            compiler = command.compiler
-        else:
-            raise RuntimeError(f"Unsupported compiler {command.compiler}!")
-
-        assert compiler is not None, f"Couldn't determine compiler executable for {command}"
-
         """
         Remove comments.
         Otherwise, Clang will put a lot of additional comments for headers and flags.
         Thus, enabling OpenMP will change the file even if does not affect anything.
         """
-        preprocess_cmd = [compiler, "-E", "-P"]
-
-        # additional flags for target triple
-        if command.target_triple is not None:
-            if command.compiler_type == Compiler.CLANG:
-                preprocess_cmd.append(f"--target={command.target_triple.value}")
-            else:
-                raise RuntimeError(f"Don't know how to handle target triple {command.target_triple} using compiler {command.compiler_type}")
+        preprocess_cmd = [*command.cmdline_compiler(), "-E", "-P"]
 
         # additional flags for CUDA compiler
         if command.compiler_type == Compiler.NVCC:
@@ -389,11 +371,9 @@ class ClangPreprocesser(Action):
 
         preprocessed_file = str(Path(target).with_suffix(".i"))
 
-        preprocess_cmd.extend([">", preprocessed_file])
-
         # Docker will not allow us to run directly "cmd > output"
         # We need to redirect this as a shell command
-        cmd = ["/bin/bash", "-c", " ".join(preprocess_cmd)]
+        cmd = ["/bin/bash", "-c", f"{shlex.join(preprocess_cmd)} > {preprocessed_file}"]
 
         if not self.dry_run:
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)

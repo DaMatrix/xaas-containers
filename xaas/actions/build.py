@@ -222,12 +222,16 @@ class BuildGenerator(Action):
             ]),
             shell.Pipeline([
                 shell.SimpleCommand([
-                    # f"PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH",
                     XaaSConfig().tool_locations.noop_compiler_redirect_wrapper_executable,
                     "make",
+                    "--keep-going",
+                    "--print-directory",
+                    # ensure that the build log is ordered even when building in parallel, as otherwise the interleaved output from
+                    # multiple recursive make invocations could result in the working directory getting mixed up for different commands
+                    "--output-sync=recurse",
                     f"-j{os.process_cpu_count()}",
-                    "-w",
                 ], assignments={
+                    # PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH
                     "PATH": shell.Concat([
                         shell.Literal(f"{XaaSConfig().tool_locations.noop_compiler_redirect_dir}:"),
                         shell.Parameter("PATH"),
