@@ -438,7 +438,7 @@ class BuildAnalyzer(Action):
                 result.cpu_tuning.add(elem)
             # Handle other flags starting with -f
             # ignore warnings
-            elif elem.startswith("-f"):
+            elif elem.startswith("-f") and elem != "-forward-unknown-to-host-compiler":
                 result.flags.add(elem)
             # ignore warnings
             elif elem.startswith("-W"):
