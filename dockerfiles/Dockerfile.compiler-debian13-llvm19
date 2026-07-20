@@ -28,8 +28,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
     && update-alternatives --install /usr/bin/cc cc /usr/bin/clang-19 100 \
     && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-19 100 \
     && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100 \
-    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 100
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 100 \
+    # Make flang be the default Fortran compiler
+    && update-alternatives --install /usr/bin/f77 f77 /usr/bin/flang-new-19 100 \
+    && update-alternatives --install /usr/bin/f95 f95 /usr/bin/flang-new-19 100 \
+    && update-alternatives --install /usr/bin/flang flang /usr/bin/flang-new-19 100 \
+    && update-alternatives --install /usr/bin/flang-new flang-new /usr/bin/flang-new-19 100
 
 # Make flang be the default Fortran compiler
-# TODO: jrabil: this should probably be changed to not use an absolute path (so that the no-op compiler redirect can replace it)
-ENV FC=/usr/bin/flang-new-19
+ENV FC=flang-new-19

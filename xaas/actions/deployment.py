@@ -65,6 +65,12 @@ class Deployment(Action):
         # TODO: jrabil: stop hardcoding /build and /source everywhere
         build_commands.append(shell.SimpleCommand(["cd", "/build"]))
 
+        # if the libtool lofile creation script exists, we should run it :)
+        build_commands.append(shell.ListOr([
+            shell.SimpleCommand(["test", "!", "-f", ir_container_utils.CREATE_LIBTOOL_LOFILES_SCRIPT_NAME]),
+            shell.SimpleCommand(["bash", ir_container_utils.CREATE_LIBTOOL_LOFILES_SCRIPT_NAME])
+        ]))
+
         # parallel --eta --halt now,fail=1 -j{self.parallel_workers} < build.sh
         build_commands.append(shell.SimpleCommand([
             "parallel",

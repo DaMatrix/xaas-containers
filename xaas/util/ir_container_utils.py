@@ -5,6 +5,9 @@ from typing import Generator
 from xaas.config import BuildSystemArguments, FeatureType, PartialRunConfig, DockerLayerPrepared, CPUArchitecture, DerivedDockerImageDescriptor
 
 
+CREATE_LIBTOOL_LOFILES_SCRIPT_NAME: str = "xaas_create_libtool_lofiles.bash"
+
+
 def get_all_feature_permutations(
         effective_run_config: PartialRunConfig,
 ) -> Generator[tuple[dict[FeatureType, bool], dict[str, str]]]:

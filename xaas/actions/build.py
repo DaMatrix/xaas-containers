@@ -224,11 +224,11 @@ class BuildGenerator(Action):
                 *modified_arguments.arguments,
             ]))
 
-        make_log_path_dryrun = os.path.join(container_build_dir, "make_dryrun.log")
-
         commands.append(shell.SimpleCommand(["set", "-o", "pipefail"]))
         commands.append(shell.Pipeline([
             # generate the initial make dry-run log
+            #   group it with an ' || true' so that even if this fails due to files without recipes, which seems to happen a lot during dry
+            #   runs, it still exits successfully
             shell.ListOr([
                 shell.SimpleCommand([
                     "make",
@@ -238,7 +238,6 @@ class BuildGenerator(Action):
                 ]),
                 shell.SimpleCommand(["true"]),
             ]),
-            shell.SimpleCommand(["tee", make_log_path_dryrun]),
 
             # run compiledb on the initial make dry-run log to find all the compile commands, including any libtool part
             shell.SimpleCommand([
@@ -257,90 +256,11 @@ class BuildGenerator(Action):
                 "/tools/xaas_libtool_detector",
                 "--input", "/dev/stdin",
                 "--output-normal", os.path.join(container_build_dir, "compile_commands.json"),
-                "--output-lo", os.path.join(container_build_dir, "create_lofiles.bash"),
+                "--output-lo", os.path.join(container_build_dir, ir_container_utils.CREATE_LIBTOOL_LOFILES_SCRIPT_NAME),
             ]),
         ]))
 
         return shell.ListAnd(commands)
-
-        return shell.ListAnd([
-            shell.SimpleCommand([
-                os.path.join(container_source_dir, "configure"),
-                f"--srcdir={container_source_dir}",
-
-                # properties from the build arguments should be defined as ./configure variables
-                *[f"{name}={value}" for name, value in ArgumentsVariableEntry.reduce_to_dict(modified_arguments.property, None).items()],
-
-                # additional ./configure arguments
-                *modified_arguments.arguments,
-            ]),
-            shell.Pipeline([
-                shell.SimpleCommand([
-                    XaaSConfig().tool_locations.noop_compiler_redirect_wrapper_executable,
-                    "make",
-                    "--keep-going",
-                    "--print-directory",
-                    # ensure that the build log is ordered even when building in parallel, as otherwise the interleaved output from
-                    # multiple recursive make invocations could result in the working directory getting mixed up for different commands
-                    "--output-sync=recurse",
-                    f"-j{os.process_cpu_count()}",
-                ], assignments={
-                    # PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH
-                    "PATH": shell.Concat([
-                        f"{XaaSConfig().tool_locations.noop_compiler_redirect_dir}:",
-                        shell.Parameter("PATH"),
-                    ]),
-                }),
-                shell.SimpleCommand([
-                    XaaSConfig().tool_locations.compiledb_executable,
-                    # make the command be a single string instead of a list to match CMake behavior
-                    "--command-style",
-                ]),
-            ]),
-            # save all the .lo files so that they can survive make clean
-            shell.Pipeline([
-                shell.SimpleCommand([
-                    "find",
-                    ".",
-                    "-type", "f",
-                    "-name", "*.lo",
-                ]),
-                shell.SimpleCommand([
-                    "tar"
-                    "-cf",
-                    "xaas-lofiles-backup.tar",
-                    "-T", "-",
-                ]),
-            ]),
-            shell.SimpleCommand([
-                "make",
-                "clean",
-            ]),
-        ])
-
-        # return [
-        #     [
-        #         os.path.join(container_source_dir, "configure"),
-        #         f"--srcdir={container_source_dir}",
-        #
-        #         # properties from the build arguments should be defined as ./configure variables
-        #         *[ f"{name}={value}" for name, value in ArgumentsVariableEntry.reduce_to_dict(modified_arguments.property, None).items() ],
-        #
-        #         # additional CMake arguments
-        #         *arguments.arguments,
-        #     ],
-        #     [
-        #         #f"PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH",
-        #         XaaSConfig().tool_locations.noop_compiler_redirect_wrapper_executable,
-        #         "make",
-        #         f"-j{os.process_cpu_count()}",
-        #         "-w",
-        #
-        #         "|",
-        #         XaaSConfig().tool_locations.compiledb_executable,
-        #     ],
-        #     [ "make", "clean" ],
-        # ]
 
     def _build_command_cmake(
             self,
