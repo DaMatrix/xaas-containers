@@ -5,7 +5,7 @@ from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
 from xaas.config import DeployConfig
 from xaas.docker import DockerBuildFeatures
-from xaas.util import ir_container_utils
+from xaas.util import ir_container_utils, shell
 from xaas.util.dockerfile import DockerfileBuilder, DockerfileStage, CopyStep, RunStep
 
 
@@ -60,7 +60,25 @@ class Deployment(Action):
 
         # dockerfile part 1: make the source, IR and build directories accessible to the builder image, then run all the build commands
 
-        build_command = f"cd /build && parallel --eta --halt now,fail=1 -j{self.parallel_workers} < build.sh && make -j{self.parallel_workers}"
+        build_commands = []
+
+        # TODO: jrabil: stop hardcoding /build and /source everywhere
+        build_commands.append(shell.SimpleCommand(["cd", "/build"]))
+
+        # parallel --eta --halt now,fail=1 -j{self.parallel_workers} < build.sh
+        build_commands.append(shell.SimpleCommand([
+            "parallel",
+            "--eta",
+            "--halt", "now,fail=1",
+            f"-j{self.parallel_workers}",
+        ], redirects=shell.InputRedirect("build.sh")))
+
+        build_commands.append(shell.SimpleCommand([
+            "make",
+            f"-j{self.parallel_workers}",
+        ]))
+
+        build_command = shell.ListAnd(build_commands)
 
         if build_features.dockerfile_supports_run_mount:
             # if BuildKit is supported, we can avoid having to copy all the dependencies and source/IR/build dirs into the base image by
@@ -84,7 +102,10 @@ class Deployment(Action):
                         target=f"/builds/build_{build_dir_name}",
                     ),
                 ],
-                command=f"cp -a --reflink=auto /builds/build_{build_dir_name} /build && {build_command}",
+                command=shell.ListAnd([
+                    shell.SimpleCommand(["cp", "-a", "--reflink=auto", f"/builds/build_{build_dir_name}", "/build"]),
+                    build_command,
+                ]).to_shell_bash_minusc(),
             )), "compile")
         else:
             # if BuildKit is supported, we'll have to fall back to the less efficient approach of explicitly copying the dependencies
@@ -118,7 +139,7 @@ class Deployment(Action):
                         source=f"/builds/build_{build_dir_name}",
                         target=f"/build",
                     ),
-                    RunStep(command=build_command)
+                    RunStep(command=build_command.to_shell_bash_minusc())
                 ],
             ), "compile")
 
@@ -138,6 +159,7 @@ class Deployment(Action):
         )
 
         dockerfile = dockerfile_builder.build(terminal_stage)
+
         return dockerfile.to_str()
 
     def validate(self, config: DeployConfig) -> bool:

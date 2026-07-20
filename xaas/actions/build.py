@@ -209,6 +209,60 @@ class BuildGenerator(Action):
             }),
             arguments)
 
+        commands: list[shell.Command] = []
+
+        # TODO: jrabil: only run this if the project actually has a configure script?
+        if True:
+            commands.append(shell.SimpleCommand([
+                os.path.join(container_source_dir, "configure"),
+                f"--srcdir={container_source_dir}",
+
+                # properties from the build arguments should be defined as ./configure variables
+                *[f"{name}={value}" for name, value in ArgumentsVariableEntry.reduce_to_dict(modified_arguments.property, None).items()],
+
+                # additional ./configure arguments
+                *modified_arguments.arguments,
+            ]))
+
+        make_log_path_dryrun = os.path.join(container_build_dir, "make_dryrun.log")
+
+        commands.append(shell.SimpleCommand(["set", "-o", "pipefail"]))
+        commands.append(shell.Pipeline([
+            # generate the initial make dry-run log
+            shell.ListOr([
+                shell.SimpleCommand([
+                    "make",
+                    "--dry-run",
+                    "--keep-going",
+                    "--print-directory",
+                ]),
+                shell.SimpleCommand(["true"]),
+            ]),
+            shell.SimpleCommand(["tee", make_log_path_dryrun]),
+
+            # run compiledb on the initial make dry-run log to find all the compile commands, including any libtool part
+            shell.SimpleCommand([
+                XaaSConfig().tool_locations.compiledb_executable,
+                "--output", "-",
+                # make the command be a single string instead of a list to match CMake behavior
+                "--command-style",
+                # this is the default regex used by compiledb, but with an added case for 'libtool$'. this ensures that
+                # for commands being proxied through libtool (of the style '/bin/bash ../libtool --tag=CC --mode=compile gcc [...]'),
+                # we actually capture the entire command without the libtool part getting stripped away.
+                "--regex-compile", r"^.*-?(libtool$|gcc|clang|cc|g\+\+|c\+\+|clang\+\+)-?.*(\.exe)?",
+            ]),
+
+            # run xaas_libtool_detector to determine the real libtool build commands from the original compiledb output
+            shell.SimpleCommand([
+                "/tools/xaas_libtool_detector",
+                "--input", "/dev/stdin",
+                "--output-normal", os.path.join(container_build_dir, "compile_commands.json"),
+                "--output-lo", os.path.join(container_build_dir, "create_lofiles.bash"),
+            ]),
+        ]))
+
+        return shell.ListAnd(commands)
+
         return shell.ListAnd([
             shell.SimpleCommand([
                 os.path.join(container_source_dir, "configure"),
@@ -233,7 +287,7 @@ class BuildGenerator(Action):
                 ], assignments={
                     # PATH={XaaSConfig().tool_locations.noop_compiler_redirect_dir}:$PATH
                     "PATH": shell.Concat([
-                        shell.Literal(f"{XaaSConfig().tool_locations.noop_compiler_redirect_dir}:"),
+                        f"{XaaSConfig().tool_locations.noop_compiler_redirect_dir}:",
                         shell.Parameter("PATH"),
                     ]),
                 }),
@@ -241,6 +295,21 @@ class BuildGenerator(Action):
                     XaaSConfig().tool_locations.compiledb_executable,
                     # make the command be a single string instead of a list to match CMake behavior
                     "--command-style",
+                ]),
+            ]),
+            # save all the .lo files so that they can survive make clean
+            shell.Pipeline([
+                shell.SimpleCommand([
+                    "find",
+                    ".",
+                    "-type", "f",
+                    "-name", "*.lo",
+                ]),
+                shell.SimpleCommand([
+                    "tar"
+                    "-cf",
+                    "xaas-lofiles-backup.tar",
+                    "-T", "-",
                 ]),
             ]),
             shell.SimpleCommand([

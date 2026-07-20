@@ -107,3 +107,5 @@ COPY --link tools/noop-compiler-redirect/ /tools/noop-compiler-redirect/
 COPY --link --from=builder-debian13-llvm19_compiledb /tools /tools
 COPY --link --from=builder-debian13-llvm19_features-analyzer /tools /tools
 COPY --link --from=builder-debian13-llvm19_openmp-finder /tools /tools
+
+COPY --link /tools/xaas_libtool_detector /tools
