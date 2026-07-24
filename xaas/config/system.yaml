@@ -10,6 +10,7 @@ default_runtime_image: "${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-runner-debian
 
 tool_locations:
   compiledb_executable: "/tools/compiledb"
+  libtool_detector_executable: "/tools/xaas_libtool_detector"
   noop_compiler_redirect_dir: "/tools/noop-compiler-redirect/bin"
   noop_compiler_redirect_wrapper_executable: "/tools/noop-compiler-redirect/wrapper"
 

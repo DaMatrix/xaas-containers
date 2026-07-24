@@ -253,7 +253,7 @@ class BuildGenerator(Action):
 
             # run xaas_libtool_detector to determine the real libtool build commands from the original compiledb output
             shell.SimpleCommand([
-                "/tools/xaas_libtool_detector",
+                XaaSConfig().tool_locations.libtool_detector_executable,
                 "--input", "/dev/stdin",
                 "--output-normal", os.path.join(container_build_dir, "compile_commands.json"),
                 "--output-lo", os.path.join(container_build_dir, ir_container_utils.CREATE_LIBTOOL_LOFILES_SCRIPT_NAME),

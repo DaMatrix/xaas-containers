@@ -340,6 +340,7 @@ class XaaSConfig:
     @dataclass
     class ToolLocations(BaseXaasConfigModel):
         compiledb_executable: str
+        libtool_detector_executable: str
         noop_compiler_redirect_dir: str
         noop_compiler_redirect_wrapper_executable: str
 
