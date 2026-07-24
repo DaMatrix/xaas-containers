@@ -8,7 +8,7 @@ FROM ${XAAS_IMAGE_PREFIX}base-debian13 AS compiler-debian13-llvm19
 # Install basic stuff for compiling software
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
     eatmydata apt-get update && eatmydata apt-get install -y \
-        # build-essential (includes GCC and some other stuff)
+        # build-essential (includes GCC, automake and some other stuff)
         build-essential \
         # LLVM C/C++/Fortran compilers, LLVM linker
         clang-19 \
@@ -19,8 +19,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
         make \
         # For downloading and extracting source code
         curl \
-        unzip \
+        git \
         tar \
+        unzip \
         # For adding additional apt repositories
         apt-transport-https \
         gpg-agent \
