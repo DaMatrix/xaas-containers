@@ -197,6 +197,6 @@ if len(lo_generation_lines) > 0:
 
     with open(args.output_lo, "w") as f:
         f.write("\n".join(lo_generation_lines))
-else:
+elif os.path.exists(args.output_lo):
     # remove the lofile generation script if it's empty (this ensures that
     os.remove(args.output_lo)
