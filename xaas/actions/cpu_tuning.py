@@ -242,7 +242,8 @@ class CPUTuning(Action):
 
         features = CPUTuningFeatures()
 
-        preprocess_cmd = [self.CLANG_PATH]
+        # TODO: jrabil: will this work for NVCC?
+        preprocess_cmd = command.cmdline_compiler()
 
         preprocess_cmd.extend(command.includes)
         preprocess_cmd.extend(command.definitions)
