@@ -55,6 +55,18 @@ layers:
       arg_mapping:
         ONEAPI_VERSION:
           flag_name: ONEAPI_VERSION
+    openblas:
+      versions: ['0.3.29']
+      version_arg: OPENBLAS_VERSION
+      all_paths:
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-layer-openblas${OPENBLAS_VERSION}
+          src_path: /opt/OpenBLAS
+          dst_path: /opt/OpenBLAS
+      all_env:
+        LD_LIBRARY_PATH:
+          type: append
+          value: /opt/OpenBLAS/lib
+          separator: ':'
   arm64:
     cuda:
       versions: ['12.6']

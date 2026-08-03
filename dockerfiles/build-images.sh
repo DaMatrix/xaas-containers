@@ -8,6 +8,16 @@ XAAS_SYSTEM_VERSION="1_rc1"
 DEBIAN_VERSION=13
 LLVM_VERSION=19
 
+# get host architecture
+# (currently this is hardcoded to use the host system, eventually we should make it possible to configure this)
+. <( dpkg-architecture )
+HOST_ARCH_CPU="$DEB_HOST_ARCH_CPU" #e.g. amd64, i386, arm64
+HOST_GNU_TYPE="$DEB_HOST_GNU_TYPE" #e.g. x86_64-linux-gnu, i686-linux-gnu, aarch64-linux-gnu
+HOST_MULTIARCH="$DEB_HOST_MULTIARCH" #e.g. x86_64-linux-gnu, i386-linux-gnu, aarch64-linux-gnu
+TARGET_ARCH_CPU="$DEB_TARGET_ARCH_CPU"
+TARGET_GNU_TYPE="$DEB_TARGET_GNU_TYPE"
+TARGET_MULTIARCH="$DEB_TARGET_MULTIARCH"
+
 DOCKER_COMMAND="docker"
 XAAS_IMAGE_PREFIX="${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-"
 
@@ -25,6 +35,7 @@ Targets:
   layer-cuda    The dependency layers for the CUDA compiler and runtime.
   layer-fftw3   The dependency layers for the FFTW3 library.
   layer-mpich   The dependency layers for the MPICH library.
+  layer-openblas  The dependency layers for the OpenBLAS library.
   layer-oneapi  The dependency layers for the OneAPI compiler and runtime.
 
   If no targets are specified, all targets will be built." >&2
@@ -40,6 +51,7 @@ target_layer_cuda=false
 target_layer_fftw3=false
 target_layer_mpich=false
 target_layer_oneapi=false
+target_layer_openblas=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     layer-fftw3) any_target_specified=true; target_layer_fftw3=true;;
     layer-mpich) any_target_specified=true; target_layer_mpich=true;;
     layer-oneapi) any_target_specified=true; target_layer_oneapi=true;;
+    layer-openblas) any_target_specified=true; target_layer_openblas=true;;
     *)
       echo "Unknown target: $1" >&2
       print_usage
@@ -81,6 +94,8 @@ BUILD_ARGS=(
   --build-arg=XAAS_IMAGE_PREFIX="${XAAS_IMAGE_PREFIX}"
   --build-arg=DEBIAN_VERSION="${DEBIAN_VERSION}"
   --build-arg=LLVM_VERSION="${LLVM_VERSION}"
+  --build-arg=HOST_ARCH_CPU="${HOST_ARCH_CPU}" --build-arg=HOST_GNU_TYPE="${HOST_GNU_TYPE}" --build-arg=HOST_MULTIARCH="${HOST_MULTIARCH}"
+  --build-arg=TARGET_ARCH_CPU="${TARGET_ARCH_CPU}" --build-arg=TARGET_GNU_TYPE="${TARGET_GNU_TYPE}" --build-arg=TARGET_MULTIARCH="${TARGET_MULTIARCH}"
   --platform="linux/amd64"
 )
 
@@ -160,6 +175,15 @@ if [ "${target_layer_oneapi}" = true ]; then
         --build-arg=ONEAPI_VERSION="${ONEAPI_VERSION}" \
         --tag="${XAAS_IMAGE_PREFIX}layer-oneapi${ONEAPI_VERSION}" \
         --file="layers/Dockerfile.oneapi" "$CONTEXT_PATH"
+  done
+fi
+
+if [ "${target_layer_openblas}" = true ]; then
+  for OPENBLAS_VERSION in "0.3.29"; do
+    build_image "${BUILD_ARGS[@]}" \
+        --build-arg=OPENBLAS_VERSION="${OPENBLAS_VERSION}" \
+        --tag="${XAAS_IMAGE_PREFIX}layer-openblas${OPENBLAS_VERSION}" \
+        --file="layers/Dockerfile.openblas" "$CONTEXT_PATH"
   done
 fi
 

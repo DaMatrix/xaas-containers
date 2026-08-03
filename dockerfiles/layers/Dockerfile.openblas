@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.4
+# 1.2: RUN --mount
+# 1.4: COPY --link
+
+ARG XAAS_IMAGE_PREFIX
+ARG DEBIAN_VERSION
+ARG LLVM_VERSION
+ARG OPENBLAS_VERSION
+
+# Inheriting from the compiler image so that we get compilers and stuff
+FROM ${XAAS_IMAGE_PREFIX}compiler-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION} AS builder
+
+ARG TARGET_GNU_TYPE
+ARG TARGET_MULTIARCH
+ARG DEBIAN_VERSION
+ARG OPENBLAS_VERSION
+
+# compile OpenBLAS+LAPACK
+RUN --mount=type=tmpfs,target=/tmp \
+    set -euo pipefail && \
+    cd /tmp && \
+    curl --fail -L https://github.com/OpenMathLib/OpenBLAS/releases/download/v${OPENBLAS_VERSION}/OpenBLAS-${OPENBLAS_VERSION}.tar.gz | tar zx && \
+    cd OpenBLAS-${OPENBLAS_VERSION}/ && \
+    # these make flags are adapted from the debian package build script for libopenblas0-pthread from trixie, with the following changes: \
+    #   - increased NUM_THREADS from 128 to 256 (because AMD Epyc is wild) \
+    #   - removed all the explicit compiler flags (don't care much about stack-protector, we'll just use the OpenBLAS defaults) \
+    #   - disabled DYNAMIC_OLDER (because for our use case, performance on >15-year-old CPUs *probably* doesn't matter) \
+    make \
+        CC="clang --target=${TARGET_GNU_TYPE}" FC="flang --target=${TARGET_GNU_TYPE}" \
+        NO_LAPACKE=1 NO_AFFINITY=1 NO_WARMUP=1 \
+        NUM_THREADS=256 DYNAMIC_ARCH=1 DYNAMIC_OLDER=0 TARGET=GENERIC \
+        USE_THREAD=1 USE_OPENMP=0 INTERFACE64=0 \
+        PREFIX=/opt/OpenBLAS \
+        -j$(nproc) && \
+    make \
+        CC="clang --target=${TARGET_GNU_TYPE}" FC="flang --target=${TARGET_GNU_TYPE}" \
+        NO_LAPACKE=1 NO_AFFINITY=1 NO_WARMUP=1 \
+        NUM_THREADS=256 DYNAMIC_ARCH=1 DYNAMIC_OLDER=0 TARGET=GENERIC \
+        USE_THREAD=1 USE_OPENMP=0 INTERFACE64=0 \
+        PREFIX=/opt/OpenBLAS \
+        install
+
+FROM scratch
+COPY --from=builder --link /opt/OpenBLAS /opt/OpenBLAS
