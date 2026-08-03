@@ -273,8 +273,10 @@ class BuildGenerator(Action):
         toolchain_lines = [
             "set(CMAKE_C_COMPILER clang)",
             "set(CMAKE_CXX_COMPILER clang++)",
+            "set(CMAKE_Fortran_COMPILER flang)",
             f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
             f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
+            f"set(CMAKE_Fortran_FLAGS_INIT \"--target={target_triple.value}\")",
         ]
         with open(os.path.join(host_build_dir, toolchain_file_name), "w") as toolchain_output:
             toolchain_output.write('\n'.join(toolchain_lines))
