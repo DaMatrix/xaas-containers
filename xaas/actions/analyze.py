@@ -469,7 +469,7 @@ class BuildAnalyzer(Action):
             i += 1
 
         if not output_path:
-            raise RuntimeError(f"Unable to determine output file path for '{command}'")
+            output_path = os.path.join(build_dir, f"{os.path.splitext(os.path.basename(source))[0]}.o")
 
         assert os.path.isabs(output_path), output_path
         assert output_path.startswith("/build"), output_path
