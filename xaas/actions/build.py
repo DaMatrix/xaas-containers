@@ -154,6 +154,9 @@ class BuildGenerator(Action):
                     builder_image=builder_image_desc,
                     runtime_image=runtime_image_desc,
 
+                    clangpp_path=arguments.effective_clangpp_path(),
+                    opt_path=arguments.effective_opt_path(),
+
                     prepared_builder_image=prepared_builder_image,
                 )
 
