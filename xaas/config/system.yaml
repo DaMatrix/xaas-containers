@@ -8,6 +8,11 @@ config_vars:
 default_builder_image: "${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-builder-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION}"
 default_runtime_image: "${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-runner-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION}"
 
+default_clang_path: "clang"
+default_clangpp_path: "clang++"
+default_flang_path: "flang"
+default_opt_path: "opt-${LLVM_VERSION}"
+
 tool_locations:
   compiledb_executable: "/tools/compiledb"
   libtool_detector_executable: "/tools/xaas_libtool_detector"

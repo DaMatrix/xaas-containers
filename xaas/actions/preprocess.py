@@ -94,7 +94,6 @@ class ClangPreprocesser(Action):
 
         self.parallel_workers = parallel_workers
         self.openmp_check = openmp_check
-        self.CLANG_PATH = "/usr/bin/clang++"
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
         self.dry_run = dry_run
 

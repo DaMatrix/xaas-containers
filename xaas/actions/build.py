@@ -199,9 +199,9 @@ class BuildGenerator(Action):
         # extend the build system arguments to override the compiler binaries and compilation flags for the target
         modified_arguments = BuildSystemArguments.merge(
             BuildSystemArguments(property={
-                "CC": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "clang"),
-                "CXX": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "clang++"),
-                "F77": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "flang"),
+                "CC": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, arguments.effective_clang_path()),
+                "CXX": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, arguments.effective_clangpp_path()),
+                "F77": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, arguments.effective_flang_path()),
 
                 "CFLAGS": ArgumentsVariableEntry(ArgumentsVariableEntryType.APPEND, f"--target={target_triple.value}", separator=" "),
                 "CXXFLAGS": ArgumentsVariableEntry(ArgumentsVariableEntryType.APPEND, f"--target={target_triple.value}", separator=" "),
@@ -271,9 +271,9 @@ class BuildGenerator(Action):
     ) -> shell.Command:
         toolchain_file_name = "toolchain.cmake"
         toolchain_lines = [
-            "set(CMAKE_C_COMPILER clang)",
-            "set(CMAKE_CXX_COMPILER clang++)",
-            "set(CMAKE_Fortran_COMPILER flang)",
+            f"set(CMAKE_C_COMPILER \"{arguments.effective_clang_path()}\")",
+            f"set(CMAKE_CXX_COMPILER \"{arguments.effective_clangpp_path()}\")",
+            f"set(CMAKE_Fortran_COMPILER \"{arguments.effective_flang_path()}\")",
             f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
             f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
             f"set(CMAKE_Fortran_FLAGS_INIT \"--target={target_triple.value}\")",

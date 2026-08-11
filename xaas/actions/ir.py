@@ -34,7 +34,6 @@ class IRCompiler(Action):
         self.build_projects = build_projects
         self.conditional_build = len(self.build_projects) > 0
         self.parallel_workers = parallel_workers
-        self.CLANG_PATH = "/usr/bin/clang++-19"
         self.IR_PATH = "irs"
 
     def print_summary(self, config: PreprocessingResult) -> None:

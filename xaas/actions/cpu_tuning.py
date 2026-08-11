@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shlex
 from collections import defaultdict, namedtuple
 from itertools import islice
 from enum import Enum
@@ -268,7 +269,8 @@ class CPUTuning(Action):
 
         # FIXME: make into nice config
         get_features_cmd = [
-            "opt-19",
+            "LD_LIBRARY_PATH=/opt/AMD/aocc-compiler-5.2.0/lib",
+            f"\"$({shlex.quote(command.compiler)} -print-prog-name=opt)\"",
             "-load-pass-plugin",
             "/tools/llvm-features/libReplaceTargetFeatures.so",
             '-passes="replace-target-features"',
@@ -281,7 +283,7 @@ class CPUTuning(Action):
         code, output = self.docker_runner.exec_run(container, cmd, command.build_dir)
 
         if code != 0:
-            raise RuntimeError(f"Error extracting features! {target}: {output}")
+            raise RuntimeError(f"Error extracting features! {target}\nCommand: {cmd}\nOutput: {output.decode('utf-8')}")
 
         individual_pattern = r'"([^"]+)"="([^"]+)"'
 

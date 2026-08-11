@@ -366,6 +366,10 @@ class XaaSConfig:
         self.ir_type: IRType
         self.default_builder_image: str
         self.default_runtime_image: str
+        self.default_clang_path: str
+        self.default_clangpp_path: str
+        self.default_flang_path: str
+        self.default_opt_path: str
         self.parallelism_level: int
         self.layers: DockerLayers
         self.tool_locations: XaaSConfig.ToolLocations
@@ -384,6 +388,10 @@ class XaaSConfig:
         self.parallelism_level = config_data["parallelism_level"]
         self.default_builder_image = _variable_expand(config_data["default_builder_image"], self.config_vars)
         self.default_runtime_image = _variable_expand(config_data["default_runtime_image"], self.config_vars)
+        self.default_clang_path = _variable_expand(config_data["default_clang_path"], self.config_vars)
+        self.default_clangpp_path = _variable_expand(config_data["default_clangpp_path"], self.config_vars)
+        self.default_flang_path = _variable_expand(config_data["default_flang_path"], self.config_vars)
+        self.default_opt_path = _variable_expand(config_data["default_opt_path"], self.config_vars)
         self.tool_locations = XaaSConfig.ToolLocations.from_dict(config_data["tool_locations"])
 
         match config_data["ir_type"]:
@@ -471,6 +479,11 @@ class BuildSystemArguments(BaseXaasConfigModel):
 
     dependencies: list[LayerDepBase] = field(default_factory=list)
 
+    clang_path: str | None = None
+    clangpp_path: str | None = None
+    flang_path: str | None = None
+    opt_path: str | None = None
+
     @staticmethod
     def merge(a: BuildSystemArguments, b: BuildSystemArguments) -> BuildSystemArguments:
         return BuildSystemArguments(
@@ -482,7 +495,25 @@ class BuildSystemArguments(BaseXaasConfigModel):
 
             # simply concatenate any additional dependencies
             dependencies = a.dependencies + b.dependencies,
+
+            # merge compiler paths, prioritizing ones from later configs
+            clang_path = b.clang_path or a.clang_path,
+            clangpp_path = b.clangpp_path or a.clangpp_path,
+            flang_path = b.flang_path or a.flang_path,
+            opt_path = b.opt_path or a.opt_path,
         )
+
+    def effective_clang_path(self) -> str:
+        return self.clang_path or XaaSConfig().default_clang_path
+
+    def effective_clangpp_path(self) -> str:
+        return self.clangpp_path or XaaSConfig().default_clangpp_path
+
+    def effective_flang_path(self) -> str:
+        return self.flang_path or XaaSConfig().default_flang_path
+
+    def effective_opt_path(self) -> str:
+        return self.opt_path or XaaSConfig().default_opt_path
 
 
 @dataclass
@@ -722,6 +753,9 @@ class BuildResult(BaseXaasConfigModel):
 
     builder_image: DerivedDockerImageDescriptor
     runtime_image: DerivedDockerImageDescriptor
+
+    clangpp_path: str
+    opt_path: str
 
     # these are tags for the docker images which have been pre-staged to build the image, if any
     prepared_builder_image: str | None = None
