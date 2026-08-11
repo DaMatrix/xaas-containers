@@ -141,7 +141,7 @@ class BuildGenerator(Action):
                 volumes = []
                 volumes.append(
                     VolumeMount(
-                        source=os.path.realpath(host_source_dir), target=container_source_dir
+                        source=os.path.realpath(host_source_dir), target=container_source_dir, mode="ro"
                     )
                 )
                 volumes.append(VolumeMount(source=os.path.realpath(new_dir), target=container_build_dir))

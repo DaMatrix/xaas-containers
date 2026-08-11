@@ -162,7 +162,7 @@ class ClangPreprocesser(Action):
                 volumes = []
                 volumes.append(
                     VolumeMount(
-                        source=os.path.realpath(config.build.source_directory), target="/source"
+                        source=os.path.realpath(config.build.source_directory), target="/source", mode="ro"
                     )
                 )
 
