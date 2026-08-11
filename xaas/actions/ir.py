@@ -174,7 +174,7 @@ class IRCompiler(Action):
         futures = []
         results = []
 
-        with tqdm.tqdm(total=total_tasks, disable=True) as pbar:  # noqa: SIM117
+        with tqdm.tqdm(total=total_tasks) as pbar:  # noqa: SIM117
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
                 for target, status in config.targets.items():
                     baseline_project = status.baseline_project

@@ -6,9 +6,6 @@ import shlex
 from typing import cast
 from collections import defaultdict, namedtuple
 from itertools import islice
-from hashlib import md5
-from pathlib import Path
-from mmap import ACCESS_READ, mmap
 from dataclasses import dataclass, field
 
 import tqdm
@@ -168,7 +165,7 @@ class ClangPreprocesser(Action):
 
                 build_dir = os.path.basename(build.directory)
                 target = "/build"
-                volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target))
+                volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target, mode="ro"))
 
                 containers[build.directory] = Container(
                     self.docker_runner.run(
@@ -288,30 +285,21 @@ class ClangPreprocesser(Action):
                                 continue
 
                             logging.debug(f"Preprocess baseline {target}")
-                            cmd = config.build_comparison.project_results[
-                                status.default_build
-                            ].files[target]
 
                             original_processed_file = next(result_iter)
                             if not original_processed_file:
                                 raise RuntimeError(f"Original processed file for {target} is None???")
 
-                            success = []
+                            new_results.targets[target].projects[status.default_build].hash = original_processed_file[0]
+                            new_results.targets[target].projects[status.default_build].ir_file.has_omp = original_processed_file[1]
+
                             for name, _ in status.divergent_projects.items():
                                 logging.debug(f"Preprocess {target} for project {name}")
 
-                                cmd = config.build_comparison.project_results[name].files[target]
-
                                 processed_file = next(result_iter)
                                 if processed_file:
-                                    success.append((name, *processed_file))
-
-                            self._compare_preprocessed_files(
-                                target,
-                                (status.default_build, *original_processed_file),
-                                success,
-                                new_results.targets[target],
-                            )
+                                    new_results.targets[target].projects[name].hash = processed_file[0]
+                                    new_results.targets[target].projects[name].ir_file.has_omp = processed_file[1]
 
                 # if self.openmp_check:
                 #    self._optimize_omp(src, config.build_comparison.source_files[src])
@@ -333,7 +321,7 @@ class ClangPreprocesser(Action):
         working_dir: str,
     ) -> tuple[str, bool] | None:
         """
-        :return: a tuple (the preprocessed file path, bool flag which is True if the file uses OpenMP)
+        :return: a tuple (the preprocessed file's hash, bool flag which is True if the file uses OpenMP)
         """
 
         """
@@ -353,6 +341,9 @@ class ClangPreprocesser(Action):
         # this will include the '-x cu' flag if necessary
         preprocess_cmd.extend(command.others)
 
+        # TODO: jrabil: looking at this further, i think we really need to include flags for indicating the target CPU features!
+        #  for example, -mavx2 or -march=x86-64-v3 will affect the preprocessor (by defining macros such as __AVX2__)
+
         """
             For CUDA, the additional includes can be hidden in response files.
         """
@@ -368,29 +359,30 @@ class ClangPreprocesser(Action):
         preprocess_cmd.extend(command.flags)
         preprocess_cmd.append(command.source)
 
-        preprocessed_file = str(Path(target).with_suffix(".i"))
+        preprocess_cmd.append("-o-")
 
-        # Docker will not allow us to run directly "cmd > output"
-        # We need to redirect this as a shell command
-        cmd = ["/bin/bash", "-c", f"{shlex.join(preprocess_cmd)} > {preprocessed_file}"]
+        cmd = ["/bin/sh", "-c", f"set -euo pipefail && {shlex.join(preprocess_cmd)} | md5sum"]
+
+        preprocessed_hash: str
 
         if not self.dry_run:
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
                 logging.error(f"Error preprocessing {target}: {output.decode("utf-8")}")
                 raise RuntimeError(f"Error preprocessing {target}:\n\t{output.decode("utf-8")}\n\tCommand: {cmd}")
+
+            preprocessed_hash = output.decode("utf-8").split()[0]
+            assert len(preprocessed_hash) == 32, f"invalid md5sum output: {output.decode("utf-8")}"
         else:
-            # create empty path to allow other parts of the pipeline to work.
-            with open(preprocessed_file, "w") as f:
-                f.write("test\n")
+            preprocessed_hash = "0" * 32
 
         if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
             command.flags
         ):
-            return preprocessed_file, False
+            return preprocessed_hash, False
 
         if not self.openmp_check:
-            return preprocessed_file, True
+            return preprocessed_hash, True
 
         if not self.dry_run:
             cmd = [self.OMP_TOOL_PATH, "-p", "/build", command.source]
@@ -399,37 +391,9 @@ class ClangPreprocesser(Action):
                 logging.error(f"Error OMP processing {target}: {output}")
                 raise RuntimeError(f"Error OMP processing {target}:\n\t{output}")
 
-            return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
+            return preprocessed_hash, "XAAS_OMP_FOUND" in output.decode("utf-8")
         else:
-            return preprocessed_file, False
-
-    def _hash_file(self, path: str) -> str:
-        with open(path) as f:
-            file_hash = md5()
-            with mmap(f.fileno(), 0, access=ACCESS_READ) as m:
-                file_hash.update(m)
-        return file_hash.hexdigest()
-
-    def _compare_preprocessed_files(
-        self,
-        target: str,
-        original_processed_file: tuple[str, str, bool],
-        processed_files: list[tuple[str, str, bool]],
-        result: ProcessedResults,
-    ):
-        logging.debug(f"Comparing preprocessed files for {target}")
-
-        original_path = os.path.join(*original_processed_file[0:2])
-        result.projects[original_processed_file[0]].hash = self._hash_file(original_path)
-        result.projects[original_processed_file[0]].ir_file.has_omp = original_processed_file[2]
-        os.remove(original_path)
-
-        for processed_file in processed_files:
-            new_path = os.path.join(*processed_file[0:2])
-
-            result.projects[processed_file[0]].hash = self._hash_file(new_path)
-            result.projects[processed_file[0]].ir_file.has_omp = processed_file[2]
-            os.remove(new_path)
+            return preprocessed_hash, False
 
     # def _optimize_omp(
     #    self,
