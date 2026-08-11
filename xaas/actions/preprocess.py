@@ -393,8 +393,7 @@ class ClangPreprocesser(Action):
             return preprocessed_file, True
 
         if not self.dry_run:
-            omp_tool_cmd = [self.OMP_TOOL_PATH, preprocessed_file]
-            cmd = ["/bin/bash", "-c", " ".join(omp_tool_cmd)]
+            cmd = [self.OMP_TOOL_PATH, "-p", "/build", command.source]
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
                 logging.error(f"Error OMP processing {target}: {output}")

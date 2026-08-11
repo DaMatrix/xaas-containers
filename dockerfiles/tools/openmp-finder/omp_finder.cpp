@@ -45,9 +45,9 @@ int main(int argc, const char **argv) {
 
   Finder.addMatcher(OMPMatcher, &Detector);
 
-  Tool.run(newFrontendActionFactory(&Finder).get());
+  int status = Tool.run(newFrontendActionFactory(&Finder).get());
 
   std::cout << (Detector.isFound() ? "XAAS_OMP_FOUND" : "XAAS_OMP_NOTFOUND");
 
-  return 0;
+  return status;
 }
